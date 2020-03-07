@@ -1,0 +1,100 @@
+# Create a Role in the default namespace that grants access to the agones api
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fleet-allocator
+  namespace: default
+  labels:
+    app: fleet-allocator
+rules:
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+- apiGroups: ["allocation.agones.dev"]
+  resources: ["gameserverallocations"]
+  verbs: ["create"]
+- apiGroups: ["agones.dev"]
+  resources: ["fleets"]
+  verbs: ["get"]
+
+---
+# Create a ServiceAccount that will be bound to the above role
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fleet-allocator
+  namespace: default
+  labels:
+    app: fleet-allocator
+
+---
+# Bind the fleet-allocator ServiceAccount to the fleet-allocator Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fleet-allocator
+  namespace: default
+  labels:
+    app: fleet-allocator
+subjects:
+- kind: ServiceAccount
+  name: fleet-allocator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fleet-allocator
+
+---
+# Define a Service for the fleet-allocator
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-allocator-endpoint
+  annotations:
+    service.alpha.kubernetes.io/app-protocols: '{"http":"HTTP"}'
+  labels:
+    app: fleet-allocator
+spec:
+  type: NodePort
+  selector:
+    app: fleet-allocator
+  ports:
+  - port: 80
+    protocol: TCP
+    name: http
+    targetPort: fleet-allocator  # retrieve port from deployment config
+
+---
+# Deploy a pod to run the fleet-allocator code
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleet-allocator
+  namespace: default
+  labels:
+    app: fleet-allocator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fleet-allocator
+  template:
+    metadata:
+      labels:
+        app: fleet-allocator
+    spec:
+      serviceAccount: fleet-allocator
+      containers:
+      - name: fleet-allocator
+        image: localimage/mod_allocator-service:0.1
+        imagePullPolicy: Never
+        ports:
+        - name: fleet-allocator
+          containerPort: 80
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 3
+          periodSeconds: 5
