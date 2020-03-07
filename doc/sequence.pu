@@ -1,0 +1,170 @@
+@startuml
+
+actor Client1
+actor Client2
+actor Client3
+participant MatchFrontend
+box "OpenMatch" #f0f8ff
+    participant Frontend
+    database StateStore
+    participant Query
+    participant MatchFunction
+    participant Backend
+    participant Director
+end box
+participant AllocateService
+participant GameServer
+
+Client1 -> MatchFrontend: RequestMatch
+activate MatchFrontend
+MatchFrontend -> Frontend: CreateTicket
+Frontend --> StateStore: RegisterTicket
+
+
+Client2 -> MatchFrontend: RequestMatch
+activate MatchFrontend
+MatchFrontend -> Frontend: CreateTicket
+Frontend --> StateStore: RegisterTicket
+
+Director -> Director: Triger(Periodically call)
+activate Director
+Director -> Backend: FetchMatches
+activate Backend
+Backend -> MatchFunction: execute
+activate MatchFunction
+MatchFunction -> Query: Fetch
+activate Query
+Query --> StateStore: Fetch
+StateStore --> Query: Tickets
+return Tickets
+MatchFunction -> MatchFunction: Create Match
+return Match
+return Match
+
+Director -> AllocateService: RequestAllocate
+activate AllocateService
+AllocateService --> GameServer: Allocate
+return IP / Port
+
+Director -> Director: CreateAssignment
+Director -> Backend: SetAssignment
+deactivate Director
+activate Backend
+note left: Set this Assignment on all the Tickets in the Match
+Backend --> StateStore: StoreMatch
+deactivate Backend
+
+loop Assignment is not nil
+    MatchFrontend -> Frontend: GetTicket
+    Frontend --> StateStore: GetTicket
+    StateStore --> Frontend: Ticket
+    Frontend -> MatchFrontend: Ticket
+    MatchFrontend -> Frontend: GetAssignment
+    Frontend --> StateStore: GetAssignment
+    StateStore --> Frontend: Assignment
+    Frontend -> MatchFrontend: Assignment
+end
+MatchFrontend -> Frontend: DeleteTicket
+Frontend --> StateStore: DeleteTicket
+return Assignment
+return Assignment
+note left of Frontend: Include IP / Port
+
+== End: MatchMake ==
+
+Client1 -> Client1: Start Game Session
+activate Client1
+Client1 -> GameServer: Connection
+
+activate GameServer
+
+Client2 -> Client2: Start Game Session
+activate Client2
+Client2 -> GameServer: Connection
+
+GameServer -> GameServer: Start Game Session
+
+== Start: Backfill ==
+
+GameServer -> MatchFrontend: Register can Backfill
+activate MatchFrontend
+MatchFrontend -> Frontend: CreateBackfillTicket
+Frontend --> StateStore: RegisterBackfillTicket
+deactivate MatchFrontend
+
+...
+
+Client3 -> MatchFrontend: RequestMatch
+activate MatchFrontend
+MatchFrontend -> Frontend: CreateTicket
+Frontend --> StateStore: RegisterTicket
+
+Director -> Director: Triger(Periodically call)
+activate Director
+Director -> Backend: FetchMatches
+activate Backend
+Backend -> MatchFunction: execute
+activate MatchFunction
+MatchFunction -> Query: Fetch
+activate Query
+Query --> StateStore: Fetch
+StateStore --> Query: Tickets
+return Tickets
+note left: Include Backfill Ticket
+MatchFunction -> MatchFunction: Create Match
+note left: Associate with Backfill Ticket
+return Match
+return Match
+
+Director -> Director: CreateAssignment
+Director -> Backend: SetAssignment
+deactivate Director
+activate Backend
+Backend --> StateStore: StoreMatch
+deactivate Backend
+
+loop Assignment is not nil
+    MatchFrontend -> Frontend: GetTicket
+    Frontend --> StateStore: GetTicket
+    StateStore --> Frontend: Ticket
+    Frontend -> MatchFrontend: Ticket
+    MatchFrontend -> Frontend: GetAssignment
+    Frontend --> StateStore: GetAssignment
+    StateStore --> Frontend: Assignment
+    Frontend -> MatchFrontend: Assignment
+end
+MatchFrontend -> Frontend: DeleteTicket
+Frontend --> StateStore: DeleteTicket
+return Assignment
+note left of Frontend: Include IP / Port
+
+Client3 -> Client3: Start Game Session
+activate Client3
+Client3 -> GameServer: Connection
+
+== End: Backfill ==
+
+...
+
+Client1 -> GameServer: End
+GameServer -> Client1: End Game Session
+destroy Client1
+deactivate Client1
+deactivate Client1
+GameServer -> Client2: End Game Session
+destroy Client2
+deactivate Client2
+deactivate Client2
+GameServer -> Client3: End Game Session
+destroy Client3
+deactivate Client3
+deactivate Client3
+
+GameServer -> GameServer: End Game Session
+deactivate GameServer
+
+== End: GamePlay ==
+
+destroy GameServer
+
+@enduml
