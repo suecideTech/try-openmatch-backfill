@@ -86,10 +86,10 @@ GameServer -> GameServer: Start GameSession
 
 == Start: Backfill ==
 
-GameServer -> MatchFrontend: Register can Backfill
+GameServer -[#red]> MatchFrontend: Register can Backfill
 activate MatchFrontend
-MatchFrontend -> Frontend: CreateBackfillTicket
-Frontend --> StateStore: RegisterBackfillTicket
+MatchFrontend -[#red]> Frontend: CreateBackfillTicket
+Frontend --[#red]> StateStore: RegisterBackfillTicket
 deactivate MatchFrontend
 
 ...
@@ -113,8 +113,8 @@ return Tickets
 note left: Include Backfill Ticket
 MatchFunction -> MatchFunction: Create Match
 note left: Associate with Backfill Ticket
-MatchFunction -> Frontend: DeleteBackfillTicket
-Frontend --> StateStore: DeleteBackfillTicket
+MatchFunction -[#red]> Frontend: DeleteBackfillTicket
+Frontend --[#red]> StateStore: DeleteBackfillTicket
 return Match
 return Match
 
