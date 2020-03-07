@@ -37,7 +37,7 @@ activate Query
 Query --> StateStore: Fetch
 StateStore --> Query: Tickets
 return Tickets
-MatchFunction -> MatchFunction: Create Match
+MatchFunction -> MatchFunction: CreateMatch
 return Match
 return Match
 
@@ -72,17 +72,17 @@ note left of Frontend: Include IP / Port
 
 == End: MatchMake ==
 
-Client1 -> Client1: Start Game Session
+Client1 -> Client1: Start GameSession
 activate Client1
 Client1 -> GameServer: Connection
 
 activate GameServer
 
-Client2 -> Client2: Start Game Session
+Client2 -> Client2: Start GameSession
 activate Client2
 Client2 -> GameServer: Connection
 
-GameServer -> GameServer: Start Game Session
+GameServer -> GameServer: Start GameSession
 
 == Start: Backfill ==
 
@@ -113,6 +113,8 @@ return Tickets
 note left: Include Backfill Ticket
 MatchFunction -> MatchFunction: Create Match
 note left: Associate with Backfill Ticket
+MatchFunction -> Frontend: DeleteBackfillTicket
+Frontend --> StateStore: DeleteBackfillTicket
 return Match
 return Match
 
@@ -138,7 +140,7 @@ Frontend --> StateStore: DeleteTicket
 return Assignment
 note left of Frontend: Include IP / Port
 
-Client3 -> Client3: Start Game Session
+Client3 -> Client3: Start GameSession
 activate Client3
 Client3 -> GameServer: Connection
 
@@ -147,20 +149,20 @@ Client3 -> GameServer: Connection
 ...
 
 Client1 -> GameServer: End
-GameServer -> Client1: End Game Session
+GameServer -> Client1: End GameSession
 destroy Client1
 deactivate Client1
 deactivate Client1
-GameServer -> Client2: End Game Session
+GameServer -> Client2: End GameSession
 destroy Client2
 deactivate Client2
 deactivate Client2
-GameServer -> Client3: End Game Session
+GameServer -> Client3: End GameSession
 destroy Client3
 deactivate Client3
 deactivate Client3
 
-GameServer -> GameServer: End Game Session
+GameServer -> GameServer: End GameSession
 deactivate GameServer
 
 == End: GamePlay ==
