@@ -42,6 +42,7 @@ func main() {
 	// create REST
 	e := echo.New()
 	e.GET("/frontend/:gamemode", handleGetMatch)
+	e.POST("/backend/:gamemode", handleRegisterBackfill)
 	e.Start(":80")
 }
 
@@ -89,4 +90,33 @@ func handleGetMatch(c echo.Context) error {
 		log.Fatalf("Failed to Delete Ticket %v, got %s", t.GetId(), err.Error())
 	}
 	return c.JSON(http.StatusOK, matchRes)
+}
+
+// backfill
+type backfill struct {
+	Connection string `json:"connection" form:"connection" query:"connection"`
+	PlayerNum  string `json:"playernum" form:"emplayernumail" query:"playernum"`
+}
+
+func handleRegisterBackfill(c echo.Context) error {
+	backfill := new(backfill)
+	if err := c.Bind(backfill); err != nil {
+		log.Fatalf("Failed to echo Bind, got %v", err)
+		return c.JSON(http.StatusInternalServerError, backfill)
+	}
+
+	// Create Ticket.
+	gamemode := c.Param("gamemode")
+	req := &pb.CreateTicketRequest{
+		Ticket: makeBackfillTicket(gamemode, backfill.Connection, backfill.PlayerNum),
+	}
+	resp, err := fe.CreateTicket(context.Background(), req)
+	if err != nil {
+		log.Fatalf("Failed to CreateTicket, got %v", err)
+		return c.JSON(http.StatusInternalServerError, backfill)
+	}
+	t := resp.Ticket
+	log.Printf("Create Ticket: %v", t.GetId())
+
+	return c.JSON(http.StatusOK, backfill)
 }
