@@ -14,6 +14,7 @@ func makeTicket(gamemode string) *pb.Ticket {
 			// assumes only single mode selection per Ticket.
 			Tags: []string{
 				gamemode,
+				"player",
 			},
 		},
 	}
@@ -29,6 +30,7 @@ func makeBackfillTicket(gamemode string, connection string, playernum string) *p
 		SearchFields: &pb.SearchFields{
 			Tags: []string{
 				gamemode,
+				"backfill",
 			},
 		},
 		Assignment: &pb.Assignment{

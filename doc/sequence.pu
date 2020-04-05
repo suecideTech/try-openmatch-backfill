@@ -44,6 +44,7 @@ return Match
 Director -> AllocateService: RequestAllocate
 activate AllocateService
 AllocateService --> GameServer: Allocate
+AllocateService -[#red]>  GameServer: Notice IP / Port
 return IP / Port
 
 Director -> Director: CreateAssignment
@@ -52,13 +53,6 @@ activate Backend
 note left: Set this Assignment on all the Tickets in the Match
 Backend --> StateStore: StoreMatch
 deactivate Backend
-
-Director -[#red]> Director: Register Backfill
-Director -[#red]> MatchFrontend: Register Backfill
-activate MatchFrontend
-MatchFrontend -[#red]> Frontend: CreateBackfillTicket
-Frontend --[#red]> StateStore: RegisterBackfillTicket
-deactivate MatchFrontend
 deactivate Director
 
 ...
@@ -75,11 +69,11 @@ loop Assignment is not nil
 end
 MatchFrontend -> Frontend: DeleteTicket
 Frontend --> StateStore: DeleteTicket
+note left of MatchFrontend: Include IP / Port
 return Assignment
 return Assignment
-note left of Frontend: Include IP / Port
 
-== End: MatchMake ==
+== Start GameSession ==
 
 Client1 -> Client1: Start GameSession
 activate Client1
@@ -93,7 +87,17 @@ Client2 -> GameServer: Connection
 
 GameServer -> GameServer: Start GameSession
 
-== Start: Backfill ==
+== Start Backfill ==
+
+GameServer -[#red]> GameServer: Register Backfill
+note left of GameServer: Include IP / Port
+GameServer -[#red]> MatchFrontend: Register Backfill
+activate MatchFrontend
+MatchFrontend -[#red]> Frontend: CreateBackfillTicket
+Frontend --[#red]> StateStore: RegisterBackfillTicket
+deactivate MatchFrontend
+
+...
 
 Client3 -> MatchFrontend: RequestMatch
 activate MatchFrontend
@@ -138,8 +142,8 @@ loop Assignment is not nil
 end
 MatchFrontend -> Frontend: DeleteTicket
 Frontend --> StateStore: DeleteTicket
+note left of MatchFrontend: Include IP / Port
 return Assignment
-note left of Frontend: Include IP / Port
 
 Client3 -> Client3: Start GameSession
 activate Client3

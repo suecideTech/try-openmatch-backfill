@@ -92,14 +92,14 @@ func handleGetMatch(c echo.Context) error {
 	return c.JSON(http.StatusOK, matchRes)
 }
 
-// backfill
-type backfill struct {
+// backfillRequest
+type backfillRequest struct {
 	Connection string `json:"connection" form:"connection" query:"connection"`
 	PlayerNum  string `json:"playernum" form:"emplayernumail" query:"playernum"`
 }
 
 func handleRegisterBackfill(c echo.Context) error {
-	backfill := new(backfill)
+	backfill := new(backfillRequest)
 	if err := c.Bind(backfill); err != nil {
 		log.Fatalf("Failed to echo Bind, got %v", err)
 		return c.JSON(http.StatusInternalServerError, backfill)
