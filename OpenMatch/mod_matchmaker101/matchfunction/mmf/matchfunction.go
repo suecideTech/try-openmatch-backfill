@@ -3,6 +3,7 @@ package mmf
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"open-match.dev/open-match/pkg/matchfunction"
@@ -14,8 +15,9 @@ import (
 // a Match Proposal. It continues to generate proposals till one of the pools
 // runs out of Tickets.
 const (
-	matchName              = "basic-matchfunction"
-	ticketsPerPoolPerMatch = 3
+	matchName                 = "basic-matchfunction"
+	mixTicketsPerPoolPerMatch = 2
+	maxTicketsPerPoolPerMatch = 4
 )
 
 // Run is this match function's implementation of the gRPC call defined in api/matchfunction.proto.
@@ -23,61 +25,105 @@ func (s *MatchFunctionService) Run(req *pb.RunRequest, stream pb.MatchFunction_R
 	// Fetch tickets for the pools specified in the Match Profile.
 	log.Printf("Generating proposals for function %v", req.GetProfile().GetName())
 
-	poolTickets, err := matchfunction.QueryPools(stream.Context(), s.queryServiceClient, req.GetProfile().GetPools())
-	if err != nil {
-		log.Printf("Failed to query tickets for the given pools, got %s", err.Error())
-		return err
-	}
-
-	// Generate proposals.
-	proposals, err := makeMatches(req.GetProfile(), poolTickets)
-	if err != nil {
-		log.Printf("Failed to generate matches, got %s", err.Error())
-		return err
-	}
-
-	log.Printf("Streaming %v proposals to Open Match", len(proposals))
-	// Stream the generated proposals back to Open Match.
-	for _, proposal := range proposals {
-		if err := stream.Send(&pb.RunResponse{Proposal: proposal}); err != nil {
-			log.Printf("Failed to stream proposals to Open Match, got %s", err.Error())
+	for _, pool := range req.GetProfile().GetPools() {
+		// Get Player Tickets.
+		playerPool := *pool
+		playerTag := pb.TagPresentFilter{Tag: "player"}
+		playerPool.TagPresentFilters = append(playerPool.TagPresentFilters, &playerTag)
+		playerTickets, err := matchfunction.QueryPool(stream.Context(), s.queryServiceClient, &playerPool)
+		if err != nil {
+			log.Printf("Failed to query tickets for the given pool, got %s", err.Error())
 			return err
+		}
+
+		// Get Backfill Ticket.
+		backfillPool := *pool
+		backfillTag := pb.TagPresentFilter{Tag: "backfill"}
+		backfillPool.TagPresentFilters = append(backfillPool.TagPresentFilters, &backfillTag)
+		backfillTickets, err := matchfunction.QueryPool(stream.Context(), s.queryServiceClient, &backfillPool)
+		if err != nil {
+			log.Printf("Failed to query tickets for the given pool, got %s", err.Error())
+			return err
+		}
+
+		// Generate proposal.
+		proposals, err := makeMatches(req.GetProfile(), playerTickets, backfillTickets)
+		if err != nil {
+			log.Printf("Failed to generate matches, got %s", err.Error())
+			return err
+		}
+
+		log.Printf("Streaming %v proposals to Open Match", len(proposals))
+
+		// Stream the generated proposals back to Open Match.
+		for _, proposal := range proposals {
+			if err := stream.Send(&pb.RunResponse{Proposal: proposal}); err != nil {
+				log.Printf("Failed to stream proposals to Open Match, got %s", err.Error())
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func makeMatches(p *pb.MatchProfile, poolTickets map[string][]*pb.Ticket) ([]*pb.Match, error) {
+// makeMatches Matcheを作成
+func makeMatches(p *pb.MatchProfile, playerTickets []*pb.Ticket, backfillTickets []*pb.Ticket) ([]*pb.Match, error) {
 	var matches []*pb.Match
-	count := 0
-	for {
-		insufficientTickets := false
-		matchTickets := []*pb.Ticket{}
-		for pool, tickets := range poolTickets {
-			if len(tickets) < ticketsPerPoolPerMatch {
-				// This pool is completely drained out. Stop creating matches.
-				insufficientTickets = true
-				break
-			}
 
-			// Remove the Tickets from this pool and add to the match proposal.
-			matchTickets = append(matchTickets, tickets[0:ticketsPerPoolPerMatch]...)
-			poolTickets[pool] = tickets[ticketsPerPoolPerMatch:]
+	matchTickets := []*pb.Ticket{}
+
+	if len(playerTickets) <= 0 {
+		return matches, nil
+	}
+
+	// BackFillチケットから空いているプレイヤーを埋めていく
+	for _, backfillTicket := range backfillTickets {
+		// 現在のプレイヤー数を取得
+		extensions := backfillTicket.GetAssignment().GetExtensions()
+		currentPlayerByte := extensions["PlayerNum"].GetValue()
+		currentPlayerNumStr := string(currentPlayerByte)
+		currentPlayerNum, err := strconv.Atoi(currentPlayerNumStr)
+		if err != nil {
+			return matches, err
 		}
 
-		if insufficientTickets {
+		// 不足しているプレイヤー数分のPlayerTicketを1Matcheにまとめる
+		fillPlayerNum := maxTicketsPerPoolPerMatch - currentPlayerNum
+		if fillPlayerNum <= len(playerTickets) {
+			matchTickets = append(matchTickets, backfillTicket)
+			matchTickets = append(matchTickets, playerTickets[0:fillPlayerNum]...)
+			playerTickets = playerTickets[fillPlayerNum:]
+
+			matches = append(matches, &pb.Match{
+				MatchId:       fmt.Sprintf("profile-%v-time-%v", p.GetName(), time.Now().Format("2006-01-02T15:04:05.00")),
+				MatchProfile:  p.GetName(),
+				MatchFunction: matchName,
+				Tickets:       matchTickets,
+			})
+		}
+	}
+
+	// 通常のマッチメイク
+	for {
+		if len(playerTickets) < mixTicketsPerPoolPerMatch {
 			break
 		}
 
+		if maxTicketsPerPoolPerMatch <= len(playerTickets) {
+			matchTickets = append(matchTickets, playerTickets[0:maxTicketsPerPoolPerMatch]...)
+			playerTickets = playerTickets[maxTicketsPerPoolPerMatch:]
+		} else {
+			currentTickets := len(playerTickets)
+			matchTickets = append(matchTickets, playerTickets[0:currentTickets]...)
+			playerTickets = playerTickets[currentTickets:]
+		}
 		matches = append(matches, &pb.Match{
-			MatchId:       fmt.Sprintf("profile-%v-time-%v-%v", p.GetName(), time.Now().Format("2006-01-02T15:04:05.00"), count),
+			MatchId:       fmt.Sprintf("profile-%v-time-%v", p.GetName(), time.Now().Format("2006-01-02T15:04:05.00")),
 			MatchProfile:  p.GetName(),
 			MatchFunction: matchName,
 			Tickets:       matchTickets,
 		})
-
-		count++
 	}
 
 	return matches, nil
