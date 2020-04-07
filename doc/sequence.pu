@@ -116,15 +116,18 @@ Query --> StateStore: Fetch
 StateStore --> Query: Tickets
 return Tickets
 note left: Include Backfill Ticket
-MatchFunction -> MatchFunction: Create Match
-note left: Associate with Backfill Ticket
-MatchFunction -[#red]> Frontend: DeleteBackfillTicket
-Frontend --[#red]> StateStore: DeleteBackfillTicket
+MatchFunction -[#red]> MatchFunction: Create Match
 return Match
 return Match
 
-Director -> Director: CreateAssignment
+Director -[#red]> Director: CreateAssignment
+note left: Reference from Backfill Ticket
 Director -> Backend: SetAssignment
+alt Player full
+  Director -[#red]> Frontend: Delete Backfill Ticket
+else
+  Director -[#red]> Backend: Update Backfill Ticket
+end
 deactivate Director
 activate Backend
 Backend --> StateStore: StoreMatch
