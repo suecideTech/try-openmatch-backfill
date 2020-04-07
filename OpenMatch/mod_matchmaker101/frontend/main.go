@@ -94,8 +94,8 @@ func handleGetMatch(c echo.Context) error {
 
 // backfillRequest
 type backfillRequest struct {
-	Connection string `json:"connection" form:"connection" query:"connection"`
-	PlayerNum  string `json:"playernum" form:"emplayernumail" query:"playernum"`
+	Connection        string `json:"connection" form:"connection" query:"connection"`
+	JoinablePlayerNum string `json:"joinableplayernum" form:"joinableplayernum" query:"joinableplayernum"`
 }
 
 func handleRegisterBackfill(c echo.Context) error {
@@ -108,7 +108,7 @@ func handleRegisterBackfill(c echo.Context) error {
 	// Create Ticket.
 	gamemode := c.Param("gamemode")
 	req := &pb.CreateTicketRequest{
-		Ticket: makeBackfillTicket(gamemode, backfill.Connection, backfill.PlayerNum),
+		Ticket: makeBackfillTicket(gamemode, backfill.Connection, backfill.JoinablePlayerNum),
 	}
 	resp, err := fe.CreateTicket(context.Background(), req)
 	if err != nil {

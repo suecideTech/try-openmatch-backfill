@@ -73,38 +73,44 @@ func makeMatches(p *pb.MatchProfile, playerTickets []*pb.Ticket, backfillTickets
 
 	matchTickets := []*pb.Ticket{}
 
-	if len(playerTickets) <= 0 {
-		return matches, nil
-	}
-
 	// BackFillチケットから空いているプレイヤーを埋めていく
 	for _, backfillTicket := range backfillTickets {
 		// 現在のプレイヤー数を取得
 		extensions := backfillTicket.GetAssignment().GetExtensions()
-		currentPlayerByte := extensions["PlayerNum"].GetValue()
-		currentPlayerNumStr := string(currentPlayerByte)
-		currentPlayerNum, err := strconv.Atoi(currentPlayerNumStr)
+		joinablePlayerNumByte := extensions["joinablePlayerNum"].GetValue()
+		joinablePlayerNumStr := string(joinablePlayerNumByte)
+		joinablePlayerNum, err := strconv.Atoi(joinablePlayerNumStr)
 		if err != nil {
 			return matches, err
 		}
 
 		// 不足しているプレイヤー数分のPlayerTicketを1Matcheにまとめる
-		fillPlayerNum := maxTicketsPerPoolPerMatch - currentPlayerNum
-		if fillPlayerNum <= len(playerTickets) {
-			matchTickets = append(matchTickets, backfillTicket)
-			matchTickets = append(matchTickets, playerTickets[0:fillPlayerNum]...)
-			playerTickets = playerTickets[fillPlayerNum:]
-
-			matches = append(matches, &pb.Match{
-				MatchId:       fmt.Sprintf("profile-%v-time-%v", p.GetName(), time.Now().Format("2006-01-02T15:04:05.00")),
-				MatchProfile:  p.GetName(),
-				MatchFunction: matchName,
-				Tickets:       matchTickets,
-			})
+		var joinPalyerNum int
+		if len(playerTickets) <= joinablePlayerNum {
+			joinPalyerNum = len(playerTickets)
+		} else {
+			joinPalyerNum = joinablePlayerNum
 		}
+		if joinPalyerNum <= 0 {
+			continue
+		}
+		matchTickets = append(matchTickets, backfillTicket)
+		matchTickets = append(matchTickets, playerTickets[0:joinPalyerNum]...)
+		playerTickets = playerTickets[joinPalyerNum:]
+
+		matches = append(matches, &pb.Match{
+			MatchId:       fmt.Sprintf("profile-%v-time-%v", p.GetName(), time.Now().Format("2006-01-02T15:04:05.00")),
+			MatchProfile:  p.GetName(),
+			MatchFunction: matchName,
+			Tickets:       matchTickets,
+		})
 	}
 
 	// 通常のマッチメイク
+	if len(playerTickets) <= 0 {
+		return matches, nil
+	}
+
 	for {
 		if len(playerTickets) < mixTicketsPerPoolPerMatch {
 			break

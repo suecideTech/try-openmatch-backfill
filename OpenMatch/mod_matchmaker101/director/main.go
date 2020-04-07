@@ -8,9 +8,11 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/ptypes/any"
 	"google.golang.org/grpc"
 	"open-match.dev/open-match/pkg/pb"
 )
@@ -34,6 +36,9 @@ type AllocateResponce struct {
 // Profiles and makes random assignments for the Tickets in the returned matches.
 
 const (
+	// The endpoint for the Open Match Frontend service.
+	omFrontendEndpoint = "om-frontend.open-match.svc.cluster.local:50504"
+
 	// The endpoint for the Open Match Backend service.
 	omBackendEndpoint = "om-backend.open-match.svc.cluster.local:50505"
 	// The Host and Port for the Match Function service endpoint.
@@ -46,15 +51,26 @@ const (
 	allocatePass     = "EAEC945C371B2EC361DE399C2F11E"
 )
 
+var fe pb.FrontendServiceClient
+
 func main() {
 	// Connect to Open Match Backend.
-	conn, err := grpc.Dial(omBackendEndpoint, grpc.WithInsecure())
+	beConn, err := grpc.Dial(omBackendEndpoint, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("Failed to connect to Open Match Backend, got %s", err.Error())
 	}
 
-	defer conn.Close()
-	be := pb.NewBackendServiceClient(conn)
+	defer beConn.Close()
+	be := pb.NewBackendServiceClient(beConn)
+
+	// Connect to Open Match Frontend.
+	feConn, err := grpc.Dial(omFrontendEndpoint, grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("Failed to connect to Open Match, got %v", err)
+	}
+
+	defer feConn.Close()
+	fe = pb.NewFrontendServiceClient(feConn)
 
 	// Generate the profiles to fetch matches for.
 	profiles := generateProfiles()
@@ -123,6 +139,28 @@ func fetch(be pb.BackendServiceClient, p *pb.MatchProfile) ([]*pb.Match, error) 
 
 func assign(be pb.BackendServiceClient, matches []*pb.Match) error {
 	for _, match := range matches {
+
+		// BackFillTicketを含むMatchかチェック
+		var backfillTicket *pb.Ticket = nil
+		for _, t := range match.GetTickets() {
+			tags := t.GetSearchFields().GetTags()
+			for _, tag := range tags {
+				if tag == "backfill" {
+					//BackFillを含んでいる
+					backfillTicket = t
+					break
+				}
+			}
+		}
+		if backfillTicket != nil {
+			// BackfillTicketからAssign
+			err := backfillAssign(be, match, backfillTicket)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
 		ticketIDs := []string{}
 		for _, t := range match.GetTickets() {
 			ticketIDs = append(ticketIDs, t.Id)
@@ -163,6 +201,69 @@ func assign(be pb.BackendServiceClient, matches []*pb.Match) error {
 		}
 
 		log.Printf("Assigned server %v to match %v", conn, match.GetMatchId())
+	}
+
+	return nil
+}
+
+func backfillAssign(be pb.BackendServiceClient, match *pb.Match, backfillTicket *pb.Ticket) error {
+	// AssingするTicketのIDリストを作成 (BackfillTicketも含まれているため省く)
+	ticketIDs := []string{}
+	for _, t := range match.GetTickets() {
+		if t != backfillTicket {
+			ticketIDs = append(ticketIDs, t.Id)
+		}
+	}
+
+	// BackfillTicketからConnectionを取得
+	conn := backfillTicket.GetAssignment().GetConnection()
+
+	req := &pb.AssignTicketsRequest{
+		TicketIds: ticketIDs,
+		Assignment: &pb.Assignment{
+			Connection: conn,
+		},
+	}
+	if _, err := be.AssignTickets(context.Background(), req); err != nil {
+		return fmt.Errorf("AssignTickets failed for match %v, got %w", match.GetMatchId(), err)
+	}
+
+	log.Printf("Assigned Backfill %v to match %v", conn, match.GetMatchId())
+
+	// BackfillTicketを更新 or 削除
+	extensions := backfillTicket.GetAssignment().GetExtensions()
+	joinablePlayerNumByte := extensions["joinablePlayerNum"].GetValue()
+	joinablePlayerNumStr := string(joinablePlayerNumByte)
+	joinablePlayerNum, err := strconv.Atoi(joinablePlayerNumStr)
+	if err != nil {
+		return err
+	}
+	joinablePlayerNum = joinablePlayerNum - len(ticketIDs)
+
+	if joinablePlayerNum <= 0 {
+		// 参加可能な人数を超えたためTicket削除
+		_, err = fe.DeleteTicket(context.Background(), &pb.DeleteTicketRequest{TicketId: backfillTicket.GetId()})
+		if err != nil {
+			return err
+		}
+	} else {
+		// 参加可能な人数を更新
+		ticketIDs := []string{}
+		ticketIDs = append(ticketIDs, backfillTicket.GetId())
+		var anyJoinablePlayerNum any.Any
+		anyJoinablePlayerNum.Value = []byte(strconv.Itoa(joinablePlayerNum))
+		extensions := backfillTicket.GetAssignment().GetExtensions()
+		extensions["joinablePlayerNum"] = &anyJoinablePlayerNum
+		req := &pb.AssignTicketsRequest{
+			TicketIds: ticketIDs,
+			Assignment: &pb.Assignment{
+				Connection: backfillTicket.GetAssignment().GetConnection(),
+				Extensions: extensions,
+			},
+		}
+		if _, err := be.AssignTickets(context.Background(), req); err != nil {
+			return fmt.Errorf("AssignTickets failed for match %v, got %w", match.GetMatchId(), err)
+		}
 	}
 
 	return nil

@@ -22,9 +22,9 @@ func makeTicket(gamemode string) *pb.Ticket {
 	return ticket
 }
 
-func makeBackfillTicket(gamemode string, connection string, playernum string) *pb.Ticket {
-	var anyPlayerNum any.Any
-	anyPlayerNum.Value = []byte(playernum)
+func makeBackfillTicket(gamemode string, connection string, joinablePlayerNum string) *pb.Ticket {
+	var anyJoinablePlayerNum any.Any
+	anyJoinablePlayerNum.Value = []byte(joinablePlayerNum)
 
 	ticket := &pb.Ticket{
 		SearchFields: &pb.SearchFields{
@@ -36,7 +36,7 @@ func makeBackfillTicket(gamemode string, connection string, playernum string) *p
 		Assignment: &pb.Assignment{
 			Connection: connection,
 			Extensions: map[string]*any.Any{
-				"PlayerNum": &anyPlayerNum,
+				"joinablePlayerNum": &anyJoinablePlayerNum,
 			},
 		},
 	}
