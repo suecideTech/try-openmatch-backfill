@@ -2,10 +2,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +17,13 @@ import (
 	"agones.dev/agones/pkg/util/signals"
 	sdk "agones.dev/agones/sdks/go"
 )
+
+const (
+	// OpenMatchのBackfillEndpoint
+	mfBackfillEndpoint = "match-frontend.svc.cluster.local:80/backend"
+)
+
+const maxPlayerNum = 4
 
 var addrs = map[uint]net.Addr{}
 
@@ -85,12 +94,15 @@ func doSignal() {
 
 func readWriteLoop(conn net.PacketConn, stop chan struct{}, s *sdk.SDK) {
 	b := make([]byte, 1024)
+	var connection string
 	for {
 		sender, txt := readPacket(conn, b)
 
+		var recvPort uint
 		switch addr := sender.(type) {
 		case *net.UDPAddr:
-			addrs[uint(addr.Port)] = addr
+			recvPort = uint(addr.Port)
+			addrs[recvPort] = addr
 		}
 
 		parts := strings.Split(strings.TrimSpace(txt), " ")
@@ -148,6 +160,21 @@ func readWriteLoop(conn net.PacketConn, stop chan struct{}, s *sdk.SDK) {
 				respond(conn, sender, "ERROR: Invalid ANNOTATION command, must use zero or 2 arguments\n")
 				continue
 			}
+
+		case "CONNECTION":
+			connection = txt
+
+		case "SESSIONSTART":
+			joinablePlayerNum := maxPlayerNum - len(addrs)
+			if joinablePlayerNum > 0 {
+				// OpenMatchのBackfillEndpointにBackfillTicketの作成を依頼
+				requestBackfill(connection, joinablePlayerNum)
+			}
+
+		case "LEAVE":
+			// OpenMatchのBackfillEndpointにBackfillTicketの作成を依頼
+			requestBackfill(connection, 1)
+			delete(addrs, recvPort)
 		}
 
 		respond(conn, sender, "ACK: "+txt+"\n")
@@ -273,4 +300,30 @@ func doHealth(sdk *sdk.SDK, stop <-chan struct{}) {
 		case <-tick:
 		}
 	}
+}
+
+// backfillRequest
+type backfillRequest struct {
+	Connection        string `json:"connection" form:"connection" query:"connection"`
+	JoinablePlayerNum string `json:"joinableplayernum" form:"joinableplayernum" query:"joinableplayernum"`
+}
+
+// requestBackfill
+func requestBackfill(connection string, joinablePlayerNum int) error {
+	reqBody := backfillRequest{Connection: connection, JoinablePlayerNum: strconv.Itoa(joinablePlayerNum)}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	backfillReq, err := http.NewRequest("POST", mfBackfillEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	client := new(http.Client)
+	resp, err := client.Do(backfillReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
 }

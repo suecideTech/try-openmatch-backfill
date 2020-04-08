@@ -90,7 +90,7 @@ GameServer -> GameServer: Start GameSession
 == Start Backfill ==
 
 GameServer -[#red]> GameServer: Register Backfill
-note left of GameServer: Include IP / Port
+note left of GameServer: Include IP / Port + AdditionalPlayerCount
 GameServer -[#red]> MatchFrontend: Register Backfill
 activate MatchFrontend
 MatchFrontend -[#red]> Frontend: CreateBackfillTicket

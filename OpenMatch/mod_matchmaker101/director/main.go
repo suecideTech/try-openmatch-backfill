@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -189,6 +190,8 @@ func assign(be pb.BackendServiceClient, matches []*pb.Match) error {
 		var conn string
 		conn = fmt.Sprintf("%s:%d", alo.Status.Address, alo.Status.Ports[0].Port)
 
+		go noticeConnection(conn)
+
 		req := &pb.AssignTicketsRequest{
 			TicketIds: ticketIDs,
 			Assignment: &pb.Assignment{
@@ -204,6 +207,14 @@ func assign(be pb.BackendServiceClient, matches []*pb.Match) error {
 	}
 
 	return nil
+}
+
+func noticeConnection(connection string) {
+	conn, _ := net.Dial("udp", connection)
+	defer conn.Close()
+	conn.Write([]byte("CONNECTION " + connection))
+	buffer := make([]byte, 1500)
+	conn.Read(buffer)
 }
 
 func backfillAssign(be pb.BackendServiceClient, match *pb.Match, backfillTicket *pb.Ticket) error {
