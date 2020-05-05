@@ -154,58 +154,65 @@ func assign(be pb.BackendServiceClient, matches []*pb.Match) error {
 			}
 		}
 		if backfillTicket != nil {
-			// BackfillTicketからAssign
 			err := backfillAssign(be, match, backfillTicket)
 			if err != nil {
 				return err
 			}
-			continue
+		} else {
+			err := regularAssign(be, match)
+			if err != nil {
+				return err
+			}
 		}
-
-		ticketIDs := []string{}
-		for _, t := range match.GetTickets() {
-			ticketIDs = append(ticketIDs, t.Id)
-		}
-
-		// Request Connection to AllocateService.
-		aloReq, err := http.NewRequest("GET", allocateHostName, nil)
-		if err != nil {
-			return err
-		}
-		aloReq.SetBasicAuth(allocateKey, allocatePass)
-
-		client := new(http.Client)
-		resp, err := client.Do(aloReq)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		byteArray, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-
-		var alo AllocateResponce
-		json.Unmarshal(byteArray, &alo)
-		var conn string
-		conn = fmt.Sprintf("%s:%d", alo.Status.Address, alo.Status.Ports[0].Port)
-
-		go noticeConnection(conn)
-
-		req := &pb.AssignTicketsRequest{
-			TicketIds: ticketIDs,
-			Assignment: &pb.Assignment{
-				Connection: conn,
-			},
-		}
-
-		if _, err := be.AssignTickets(context.Background(), req); err != nil {
-			return fmt.Errorf("AssignTickets failed for match %v, got %w", match.GetMatchId(), err)
-		}
-
-		log.Printf("Assigned server %v to match %v", conn, match.GetMatchId())
 	}
 
+	return nil
+}
+
+func regularAssign(be pb.BackendServiceClient, match *pb.Match) error {
+	ticketIDs := []string{}
+	for _, t := range match.GetTickets() {
+		ticketIDs = append(ticketIDs, t.Id)
+	}
+
+	// Request Connection to AllocateService.
+	aloReq, err := http.NewRequest("GET", allocateHostName, nil)
+	if err != nil {
+		return err
+	}
+	aloReq.SetBasicAuth(allocateKey, allocatePass)
+
+	client := new(http.Client)
+	resp, err := client.Do(aloReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	byteArray, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var alo AllocateResponce
+	json.Unmarshal(byteArray, &alo)
+	var conn string
+	conn = fmt.Sprintf("%s:%d", alo.Status.Address, alo.Status.Ports[0].Port)
+
+	// GameServerに接続情報を通知しておく
+	go noticeConnection(conn)
+
+	req := &pb.AssignTicketsRequest{
+		TicketIds: ticketIDs,
+		Assignment: &pb.Assignment{
+			Connection: conn,
+		},
+	}
+
+	if _, err := be.AssignTickets(context.Background(), req); err != nil {
+		return fmt.Errorf("AssignTickets failed for match %v, got %w", match.GetMatchId(), err)
+	}
+
+	log.Printf("Assigned server %v to match %v", conn, match.GetMatchId())
 	return nil
 }
 
@@ -218,7 +225,7 @@ func noticeConnection(connection string) {
 }
 
 func backfillAssign(be pb.BackendServiceClient, match *pb.Match, backfillTicket *pb.Ticket) error {
-	// AssingするTicketのIDリストを作成 (BackfillTicketも含まれているため省く)
+	// Assigne対象となるBackfillTicketを除外したTicketIDのリストを作成
 	ticketIDs := []string{}
 	for _, t := range match.GetTickets() {
 		if t != backfillTicket {
@@ -226,9 +233,8 @@ func backfillAssign(be pb.BackendServiceClient, match *pb.Match, backfillTicket 
 		}
 	}
 
-	// BackfillTicketからConnectionを取得
+	// BackfillTicketからConnectionを取得し他のTicketに反映
 	conn := backfillTicket.GetAssignment().GetConnection()
-
 	req := &pb.AssignTicketsRequest{
 		TicketIds: ticketIDs,
 		Assignment: &pb.Assignment{
@@ -241,7 +247,7 @@ func backfillAssign(be pb.BackendServiceClient, match *pb.Match, backfillTicket 
 
 	log.Printf("Assigned Backfill %v to match %v", conn, match.GetMatchId())
 
-	// BackfillTicketを更新 or 削除
+	// BackfillTicketを更新
 	extensions := backfillTicket.GetAssignment().GetExtensions()
 	joinablePlayerNumByte := extensions["joinablePlayerNum"].GetValue()
 	joinablePlayerNumStr := string(joinablePlayerNumByte)
@@ -249,32 +255,25 @@ func backfillAssign(be pb.BackendServiceClient, match *pb.Match, backfillTicket 
 	if err != nil {
 		return err
 	}
+	// 参加可能人数を更新
 	joinablePlayerNum = joinablePlayerNum - len(ticketIDs)
 
-	if joinablePlayerNum <= 0 {
-		// 参加可能な人数を超えたためTicket削除
-		_, err = fe.DeleteTicket(context.Background(), &pb.DeleteTicketRequest{TicketId: backfillTicket.GetId()})
-		if err != nil {
-			return err
-		}
-	} else {
-		// 参加可能な人数を更新
-		ticketIDs := []string{}
-		ticketIDs = append(ticketIDs, backfillTicket.GetId())
-		var anyJoinablePlayerNum any.Any
-		anyJoinablePlayerNum.Value = []byte(strconv.Itoa(joinablePlayerNum))
-		extensions := backfillTicket.GetAssignment().GetExtensions()
-		extensions["joinablePlayerNum"] = &anyJoinablePlayerNum
-		req := &pb.AssignTicketsRequest{
-			TicketIds: ticketIDs,
-			Assignment: &pb.Assignment{
-				Connection: backfillTicket.GetAssignment().GetConnection(),
-				Extensions: extensions,
-			},
-		}
-		if _, err := be.AssignTickets(context.Background(), req); err != nil {
-			return fmt.Errorf("AssignTickets failed for match %v, got %w", match.GetMatchId(), err)
-		}
+	var anyJoinablePlayerNum any.Any
+	anyJoinablePlayerNum.Value = []byte(strconv.Itoa(joinablePlayerNum))
+	extensions["joinablePlayerNum"] = &anyJoinablePlayerNum
+
+	backfillTicketID := []string{}
+	backfillTicketID = append(backfillTicketID, backfillTicket.GetId())
+
+	req = &pb.AssignTicketsRequest{
+		TicketIds: backfillTicketID,
+		Assignment: &pb.Assignment{
+			Connection: backfillTicket.GetAssignment().GetConnection(),
+			Extensions: extensions,
+		},
+	}
+	if _, err := be.AssignTickets(context.Background(), req); err != nil {
+		return fmt.Errorf("Update BackfillTickets failed for match %v, got %w", match.GetMatchId(), err)
 	}
 
 	return nil

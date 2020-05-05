@@ -4,8 +4,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +43,7 @@ func main() {
 
 	// create REST
 	e := echo.New()
-	e.GET("/frontend/:gamemode", handleGetMatch)
+	e.GET("/match/:gamemode", handleGetMatch)
 	e.POST("/backend/:gamemode", handleRegisterBackfill)
 	e.Start(":80")
 }
@@ -49,7 +51,7 @@ func main() {
 func handleGetMatch(c echo.Context) error {
 	matchRes := new(matchResponce)
 	if err := c.Bind(matchRes); err != nil {
-		log.Fatalf("Failed to echo Bind, got %v", err)
+		log.Printf("Failed to echo Bind, got %v", err)
 		return c.JSON(http.StatusInternalServerError, matchRes)
 	}
 
@@ -60,7 +62,7 @@ func handleGetMatch(c echo.Context) error {
 	}
 	resp, err := fe.CreateTicket(context.Background(), req)
 	if err != nil {
-		log.Fatalf("Failed to CreateTicket, got %v", err)
+		log.Printf("Failed to CreateTicket, got %v", err)
 		return c.JSON(http.StatusInternalServerError, matchRes)
 	}
 	t := resp.Ticket
@@ -70,7 +72,7 @@ func handleGetMatch(c echo.Context) error {
 	for {
 		got, err := fe.GetTicket(context.Background(), &pb.GetTicketRequest{TicketId: t.GetId()})
 		if err != nil {
-			log.Fatalf("Failed to GetTicket, got %v", err)
+			log.Printf("Failed to GetTicket, got %v", err)
 			return c.JSON(http.StatusInternalServerError, matchRes)
 		}
 
@@ -87,7 +89,7 @@ func handleGetMatch(c echo.Context) error {
 
 	_, err = fe.DeleteTicket(context.Background(), &pb.DeleteTicketRequest{TicketId: t.GetId()})
 	if err != nil {
-		log.Fatalf("Failed to Delete Ticket %v, got %s", t.GetId(), err.Error())
+		log.Printf("Failed to Delete Ticket %v, got %s", t.GetId(), err.Error())
 	}
 	return c.JSON(http.StatusOK, matchRes)
 }
@@ -101,8 +103,9 @@ type backfillRequest struct {
 func handleRegisterBackfill(c echo.Context) error {
 	backfill := new(backfillRequest)
 	if err := c.Bind(backfill); err != nil {
-		log.Fatalf("Failed to echo Bind, got %v", err)
-		return c.JSON(http.StatusInternalServerError, backfill)
+		errstr := fmt.Sprint("Failed to echo Bind, got %v", err)
+		log.Printf(errstr)
+		return c.String(http.StatusInternalServerError, errstr)
 	}
 
 	// Create Ticket.
@@ -112,11 +115,44 @@ func handleRegisterBackfill(c echo.Context) error {
 	}
 	resp, err := fe.CreateTicket(context.Background(), req)
 	if err != nil {
-		log.Fatalf("Failed to CreateTicket, got %v", err)
-		return c.JSON(http.StatusInternalServerError, backfill)
+		errstr := fmt.Sprint("Failed to CreateTicket, got %v", err)
+		log.Printf(errstr)
+		return c.String(http.StatusInternalServerError, errstr)
 	}
 	t := resp.Ticket
-	log.Printf("Create Ticket: %v", t.GetId())
+	log.Printf("Create BackfillTicket: %v", t.GetId())
 
-	return c.JSON(http.StatusOK, backfill)
+	// Polling TicketAssignment.
+	for {
+		got, err := fe.GetTicket(context.Background(), &pb.GetTicketRequest{TicketId: t.GetId()})
+		if err != nil {
+			errstr := fmt.Sprint("Failed to GetTicket, got %v", err)
+			log.Printf(errstr)
+			return c.String(http.StatusInternalServerError, errstr)
+		}
+
+		if got.GetAssignment() != nil {
+			extensions := got.GetAssignment().GetExtensions()
+			joinablePlayerNumByte := extensions["joinablePlayerNum"].GetValue()
+			joinablePlayerNumStr := string(joinablePlayerNumByte)
+			joinablePlayerNum, err := strconv.Atoi(joinablePlayerNumStr)
+			if err != nil {
+				errstr := fmt.Sprint("Failed to Atoi, %v", err)
+				log.Printf(errstr)
+				return c.String(http.StatusInternalServerError, errstr)
+			}
+
+			if joinablePlayerNum <= 0 {
+				log.Printf("End Backfill. Ticket(%v) conn(%v)", got.GetId(), got.GetAssignment().Connection)
+				break
+			}
+		}
+		time.Sleep(time.Second * 1)
+	}
+
+	_, err = fe.DeleteTicket(context.Background(), &pb.DeleteTicketRequest{TicketId: t.GetId()})
+	if err != nil {
+		log.Printf("Failed to Delete Ticket %v, got %s", t.GetId(), err.Error())
+	}
+	return c.String(http.StatusOK, "OK")
 }

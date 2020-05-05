@@ -163,17 +163,18 @@ func readWriteLoop(conn net.PacketConn, stop chan struct{}, s *sdk.SDK) {
 
 		case "CONNECTION":
 			connection = txt
+			delete(addrs, recvPort)
 
 		case "SESSIONSTART":
 			joinablePlayerNum := maxPlayerNum - len(addrs)
 			if joinablePlayerNum > 0 {
 				// OpenMatchのBackfillEndpointにBackfillTicketの作成を依頼
-				requestBackfill(connection, joinablePlayerNum)
+				go requestBackfill(connection, joinablePlayerNum)
 			}
 
 		case "LEAVE":
 			// OpenMatchのBackfillEndpointにBackfillTicketの作成を依頼
-			requestBackfill(connection, 1)
+			go requestBackfill(connection, 1)
 			delete(addrs, recvPort)
 		}
 
@@ -309,21 +310,21 @@ type backfillRequest struct {
 }
 
 // requestBackfill
-func requestBackfill(connection string, joinablePlayerNum int) error {
+func requestBackfill(connection string, joinablePlayerNum int) {
 	reqBody := backfillRequest{Connection: connection, JoinablePlayerNum: strconv.Itoa(joinablePlayerNum)}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	backfillReq, err := http.NewRequest("POST", mfBackfillEndpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	client := new(http.Client)
 	resp, err := client.Do(backfillReq)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	defer resp.Body.Close()
-	return nil
+	return
 }

@@ -95,7 +95,6 @@ GameServer -[#red]> MatchFrontend: Register Backfill
 activate MatchFrontend
 MatchFrontend -[#red]> Frontend: CreateBackfillTicket
 Frontend --[#red]> StateStore: RegisterBackfillTicket
-deactivate MatchFrontend
 
 ...
 
@@ -123,15 +122,16 @@ return Match
 Director -[#red]> Director: CreateAssignment
 note left: Reference from Backfill Ticket
 Director -> Backend: SetAssignment
-alt Player full
-  Director -[#red]> Frontend: Delete Backfill Ticket
-else
-  Director -[#red]> Backend: Update Backfill Ticket
-end
-deactivate Director
 activate Backend
 Backend --> StateStore: StoreMatch
 deactivate Backend
+
+Director -[#red]> Backend: Update Backfill Ticket
+activate Backend
+Backend -[#red]-> StateStore: Update Backfill Ticket
+deactivate Backend
+
+deactivate Director
 
 loop Assignment is not nil
     MatchFrontend -> Frontend: GetTicket
@@ -147,6 +147,20 @@ MatchFrontend -> Frontend: DeleteTicket
 Frontend --> StateStore: DeleteTicket
 note left of MatchFrontend: Include IP / Port
 return Assignment
+
+loop #FFEEFF AdditionalPlayerCount is Full
+    note right of MatchFrontend: AdditionalPlayerCount is included in Assignment
+    MatchFrontend -> Frontend: GetTicket
+    Frontend --> StateStore: GetTicket
+    StateStore --> Frontend: Ticket
+    Frontend -> MatchFrontend: Ticket
+    MatchFrontend -> Frontend: GetAssignment
+    Frontend --> StateStore: GetAssignment
+    StateStore --> Frontend: Assignment
+    Frontend -> MatchFrontend: Assignment
+end
+MatchFrontend -[#red]> Frontend: Delete Backfill Ticket
+deactivate Frontend
 
 Client3 -> Client3: Start GameSession
 activate Client3
